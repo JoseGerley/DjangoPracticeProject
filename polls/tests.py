@@ -1,4 +1,5 @@
 import datetime
+from random import choices
 from time import time
 from urllib import response
 
@@ -6,8 +7,18 @@ from django.test import TestCase
 from django.utils import timezone
 from django.urls import reverse
 
-from .models import Question
+from polls.views import vote
 
+from .models import Question,Choice
+
+def create_question(question_text, days=0, hour=0, minute=0):
+    """
+    Create a question with the given `question_text` and published the
+    given number of `days` offset to now (negative for questions published
+    in the past, positive for questions that have yet to be published).
+    """
+    time = timezone.now() + datetime.timedelta(days=days, hours=hour, minutes=minute)
+    return Question.objects.create(question_text=question_text, pub_date=time)
 class QuestionModelTests(TestCase):
     
     def setUp(self):
@@ -40,6 +51,16 @@ class QuestionModelTests(TestCase):
         time = timezone.now()
         self.question.pub_date = time
         self.assertIs(self.question.was_published_recently(), True)
+    
+    def test_save_question_without_choices(self):
+        """
+        save a question should raise a ValidationError if the question has no choices.
+        """
+        q1 = Question(question_text="Question without choises", pub_date = timezone.now())
+        with self.assertRaises(Exception):
+            q1.save()
+            
+
         
 class QuestionIndexViewTests(TestCase):
     def test_no_question(self):
@@ -117,3 +138,38 @@ class QuestionDetailViewTests(TestCase):
         url = reverse('polls:detail', args=(past_question.id,))
         response = self.client.get(url)
         self.assertContains(response, past_question.question_text)
+
+class QuestionResultViewTests(TestCase):
+    
+    def test_future_question(self):
+        """
+        The result view of a question with a pub_date in the future returns a 404 not found.
+        """
+        future_question = create_question(question_text='Future question.', days=5)
+        url = reverse('polls:results', args=(future_question.id,))
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+        
+    def test_past_question(self):
+        """
+        The result view of a question with a pub_date in the past displays the question's text.
+        """
+        past_question = create_question(question_text='Past Question.', days=-5)
+        url = reverse('polls:results', args=(past_question.id,))
+        response = self.client.get(url)
+        self.assertContains(response, past_question.question_text)
+        
+    def test_display_question_choices_and_votes(self):
+        """
+        The result view of a question with a pub_date in the past displays the question's text.
+        """
+        past_question = create_question(question_text='Past Question.', days=-5)
+        past_question.choice_set.create(choice_text='Choice 1', votes=1)
+        past_question.choice_set.create(choice_text='Choice 2', votes=2)
+        past_question.choice_set.create(choice_text='Choice 3', votes=3)
+        url = reverse('polls:results', args=(past_question.id,))
+        response = self.client.get(url)
+        self.assertContains(response, past_question.question_text)
+        self.assertContains(response, 'Choice 1: 1 vote')
+        self.assertContains(response, 'Choice 2: 2 votes')
+        self.assertContains(response, 'Choice 3: 3 votes')
